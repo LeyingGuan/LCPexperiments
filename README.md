@@ -1,6 +1,6 @@
 # LCPexperiments
 
-You can either install LCPexperiments as a package or source the files in under the R directory to run numerical examples in [1].
+You can either install LCPexperiments as a package via install_github("LeyingGuan/LCPexperiments") or source the files in under the R directory to run numerical examples in [1].
 
 ## Illustrating example in Intro
 See example_intro.Rmd
