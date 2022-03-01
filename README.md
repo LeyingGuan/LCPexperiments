@@ -21,3 +21,4 @@ Run X: Rscript simulation_X.R
 The intermediate training model is saved under UCI_results/X/*  , and the final results are saved under  UCI_results/* .
 
 
+[1] Localized Conformal Prediction: A Generalized Inference Framework for Conformal Prediction https://arxiv.org/abs/2106.08460.
