@@ -1,0 +1,12 @@
+Package: LCPexperiments
+Type: Package
+Title: LCP numerical experiments
+Version: 1.0
+Date: 2022-01-09
+Author: Leying Guan
+Maintainer: Leying Guan <leying.guan@yale.edu>
+Description: Running numerical examples described in the LCP paper.
+License: What license is it under?
+Imports: Rcpp (>= 1.0.7), R6, Rcpp, LCP, torch, torchvision, XRPython
+LinkingTo: Rcpp, R6, LCP, torch, torchvision, XRPython
+RoxygenNote: 7.1.1

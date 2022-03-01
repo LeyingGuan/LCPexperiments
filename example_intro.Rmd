@@ -1,0 +1,170 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r load packages}
+library(LCP)
+library(LCPexperiments)
+```
+# Introduction
+```{r}
+sim_intro = function(n){
+  x0 = 5; x1 = x0*.9; s0 = 2
+  x = runif(n, min = -x0, max = x0)
+  s = cos(x/(2*x0)*pi)
+  s[abs(x)>x1] = s0
+  y = rnorm(n)*abs(s)
+  return(list(x = x, y = y, s = s))
+}
+set.seed(2021)
+n = 2000; m = 5000
+data.tr = sim_intro(n = n)
+data.cal = sim_intro(n = n)
+data.te = sim_intro(n = m)
+alpha = .05
+#plot(data.te$x, data.te$s)
+###########CP with three procedures#######
+#########################################
+##CR
+eps_CR = abs(data.cal$y)
+order_CR = order(eps_CR)
+deltaCP = quantile(eps_CR, 1-alpha)
+qL =  -rep(deltaCP, n)
+qU = rep(deltaCP,n)
+##########################################
+library(torch)
+library(torchvision)
+library(XRPython)
+hidden_size = 32; lr = 0.005; wd = 1e-6; test_ratio = 0.2;  drop_out = 0.2;qlow = 0.025; qhigh = 0.975; use_arrangement = FALSE;
+batch_size = 32; optimizer_class = optim_adam; loss_func = nn_mse_loss(); print_out = 10; epochs = 50;
+quantiles = c(0.025, 0.05, 0.1, 0.9 ,0.95, 0.975); random_state = 1; save_path = NULL; p =1; nfolds = 5
+##CQR
+loss_func = all_quantile_loss$new(quantiles)
+  
+synthetic_qc = learnerOptimizer$new(network_new = my_neuralnet, optimizer_class = optimizer_class,
+                                      loss_type = "qc",
+                                      loss_func = loss_func$forward,all_quantiles = loss_func$quantiles, device = 'cpu',
+                                      test_ratio = 0.2,  CV = TRUE, nfolds = nfolds, random_state = random_state,
+                                      save_path = save_path,
+                                      hidden_size = hidden_size, in_shape = p, drop_out = drop_out,
+                                      lr = lr, wd = wd, qlow = qlow, qhigh = qhigh,
+                                      use_arrangement = use_arrangement, 
+                                      my_test_split_func = my_test_split_func,
+                                      my_cv_split_func = my_cv_split_func,
+                                      my_epoch_internal_train =my_epoch_internal_train)
+synthetic_qc$fit(x = matrix(data.tr$x,ncol=1), y =as.matrix(data.tr$y,ncol=1), epochs = epochs, batch_size = batch_size , print_out = print_out)
+calibration_ret_qc = synthetic_qc$predict(matrix(data.cal$x,ncol=1), my_predict_func = my_predict_func, requires_grad = F)
+idx1 = which(quantiles == (alpha/2))
+idx2 = which(quantiles == (1-alpha/2))
+vcal_qc1 =  as.array(calibration_ret_qc$yhat[,idx1]) -data.cal$y
+vcal_qc2 = data.cal$y - as.array(calibration_ret_qc$yhat[,idx2])
+vcal_qc = ifelse(vcal_qc1>vcal_qc2,vcal_qc1,vcal_qc2)
+delta_CQR = quantile(vcal_qc,1-alpha)
+
+test_ret_qc = synthetic_qc$predict(matrix(data.te$x,ncol=1), my_predict_func = my_predict_func, requires_grad = F)
+vte_qc1 =  as.array(test_ret_qc$yhat[,idx1]) -data.te$y
+vte_qc2 = data.te$y - as.array(test_ret_qc$yhat[,idx2])
+vte_qc = ifelse(vte_qc1>vte_qc2,vte_qc1,vte_qc2)
+
+qLCQR = as.array(test_ret_qc$yhat[,idx1]) -delta_CQR
+qUCQR = as.array(test_ret_qc$yhat[,idx2])+delta_CQR
+
+############LCP with regression score#####
+##LCR
+h = 0.2
+D = matrix(0, n, n)
+Dnew = matrix(0, m, n)
+DnewT = matrix(0, n, m)
+for(i in 1:n){
+  D[i,] = abs(data.cal$x[i] - data.cal$x)
+}
+for(i in 1:m){
+  Dnew[i,] = abs(data.te$x[i] - data.cal$x)
+  DnewT[,i] = abs(data.te$x[i] - data.cal$x)
+}
+myLCR = LCPmodule$new(H =D[order_CR, order_CR], V = eps_CR[order_CR], h = h, alpha = alpha, type = "distance")
+# get the lower index l(i) for i = 1,..., n in the ordered data
+myLCR$lower_idx()
+# precalculate unnormlized cumulative probablities for training data
+myLCR$cumsum_unnormalized()
+# fit in the unnormalized weight for the new sample/samples and construct conformal PI
+# Dnew is m by n (training) ordered distance matrix for m test samples and n training samples
+myLCR$LCP_construction(Hnew =Dnew[,order_CR], HnewT = DnewT[order_CR,])
+
+deltaLCP = myLCR$band_V
+qLL = -deltaLCP
+qLU = +deltaLCP
+
+##LCQR
+eps_CQR = vcal_qc
+order_CQR = order(vcal_qc)
+myLCQR = LCPmodule$new(H =D[order_CQR, order_CQR], V = eps_CQR[order_CQR], h = h, alpha = alpha, type = "distance")
+# get the lower index l(i) for i = 1,..., n in the ordered data
+myLCQR$lower_idx()
+# precalculate unnormlized cumulative probablities for training data
+myLCQR$cumsum_unnormalized()
+# fit in the unnormalized weight for the new sample/samples and construct conformal PI
+# Dnew is m by n (training) ordered distance matrix for m test samples and n training samples
+myLCQR$LCP_construction(Hnew =Dnew[,order_CQR], HnewT = DnewT[order_CQR,])
+
+deltaLCQR = myLCQR$band_V
+qLLCQR = as.array(test_ret_qc$yhat[,idx1])-deltaLCQR
+qULCQR= as.array(test_ret_qc$yhat[,idx2])+deltaLCQR
+```
+
+```{r example_intro_visualization}
+
+########results visualization
+pdf("example_intro_updated.pdf", height = 6, width = 10)
+ll = order(data.te$x)
+layout_mat = matrix(c(1,3,2,3, 4,4), byrow = T, ncol = 2)
+layout_mat
+
+layout(mat = layout_mat,
+       heights = c(3, 3,1), # Heights of the two rows
+       widths = c(1, 1))
+cex0 = 1.5
+par(mar = c(4,5,2,1))
+plot(data.te$x, abs(data.te$y), type = "p", xlab = "x", ylab = "v", cex.axis = cex0, cex.names = cex0, cex.lab = cex0, main = "regression score", cex.main = cex0)
+abline(h = deltaCP, col = "blue", lwd = 2, lty=2)
+points(data.te$x[ll],deltaLCP[ll], type = 'l', col = "red", lwd = 2,lty = 2)
+par(mar = c(4,5,2,1))
+plot(data.te$x, vte_qc, type = "p", xlab = "x", ylab = "v", cex.axis = cex0, cex.names = cex0, cex.lab = cex0, cex.main = cex0, main = "quantile regression score")
+abline(h =delta_CQR, col = "blue", lwd = 2)
+points(data.te$x[ll],deltaLCQR[ll], type = 'l', col = "red",  lwd = 2)
+
+par(mar = c(4,5,1,1))
+plot(data.te$x, data.te$y, type = "p", xlab = "x", ylab = "y", cex.axis = cex0, cex.names = cex0, cex.lab = cex0)
+abline(h = -deltaCP, col = "blue", lwd = 2,lty=2)
+abline(h = deltaCP, col = "blue", lwd = 2,lty=2)
+points(data.te$x[ll], qLL[ll], type = 'l', col = "red", lwd = 2,lty=2)
+points(data.te$x[ll], qLU[ll], type = 'l', col = "red", lwd = 2,lty=2)
+
+points(data.te$x[ll], qLCQR[ll], type = 'l', col = "blue", lwd = 2)
+points(data.te$x[ll], qUCQR[ll], type = 'l', col = "blue", lwd = 2)
+
+points(data.te$x[ll], qLLCQR[ll], type = 'l', col = "red", lty = 1, lwd = 2)
+points(data.te$x[ll], qULCQR[ll], type = 'l', col = "red", lty = 1, lwd = 2)
+
+points(data.te$x[ll], data.te$s[ll]*qnorm(1-alpha/2), type = 'l', col = "chartreuse4", lwd = 2)
+points(data.te$x[ll], data.te$s[ll]*qnorm(alpha/2), type = 'l', col = "chartreuse4", lwd = 2)
+
+par(mar = c(0,0,0,0))
+plot(1, type = "n", axes=FALSE, xlab="", ylab="")
+plot_colors <- c("blue","blue", "red", "red", "chartreuse4")
+ltys = c(2,1,2,1, 1)
+ave.lenths = c(round(deltaCP*2,2), round(mean(qUCQR-qLCQR),2),
+               round(mean(deltaLCP)*2,2), round(mean(qULCQR-qLLCQR),2), round(mean(data.te$s)*(qnorm(1-alpha/2)-qnorm(alpha/2)),2))
+legend(x = "top",inset = 0,
+        legend = c(paste0("CR:",ave.lenths[1]), paste0("CQR:",ave.lenths[2]), paste0("LCR:", ave.lenths[3]),
+                    paste0("LCQR:", ave.lenths[4]),
+                   paste0("truth:", ave.lenths[5])), 
+        col=plot_colors, lwd=2, cex=1.5, horiz = TRUE, lty = ltys)
+
+dev.off()
+```
+
+
+
+
+
